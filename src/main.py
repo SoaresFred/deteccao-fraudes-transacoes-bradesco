@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.model_selection import train_test_split
@@ -49,8 +50,10 @@ def run(data_path: str, output_dir: str = "outputs"):
     plt.savefig(output_dir / "class_distribution.png", dpi=150)
     plt.close()
 
-    # O dataset não tem data real; extraímos apenas a hora cíclica aproximada.
-    df["Hour"] = (df["Time"] % 86400) / 3600
+    # O dataset não tem data real; extraímos uma hora aproximada e a codificamos ciclicamente.
+    hour = (df["Time"] % 86400) / 3600
+    df["Hour_sin"] = np.sin(2 * np.pi * hour / 24)
+    df["Hour_cos"] = np.cos(2 * np.pi * hour / 24)
     X = df.drop(columns=["Class", "Time"])
     y = df["Class"]
 
@@ -68,13 +71,25 @@ def run(data_path: str, output_dir: str = "outputs"):
         model.fit(X_train, y_train)
         save_feature_explanation(model, X_train.columns, name, output_dir)
         selected_threshold = choose_threshold(
-            model, X_validation, y_validation, min_precision=0.50
+            model,
+            X_validation,
+            y_validation,
+            false_positive_cost=5.0,
+            false_negative_cost=150.0,
         )
         LOGGER.info("Threshold selecionado na validação para %s: %.2f", name, selected_threshold)
 
         for threshold in (0.50, selected_threshold):
             label = name if threshold == 0.50 else f"{name} (threshold validado)"
-            result = evaluate_model(label, model, X_test, y_test, threshold=threshold)
+            result = evaluate_model(
+                label,
+                model,
+                X_test,
+                y_test,
+                threshold=threshold,
+                false_positive_cost=5.0,
+                false_negative_cost=150.0,
+            )
             save_evaluation_plots(result, y_test, output_dir)
             results.append(result)
 

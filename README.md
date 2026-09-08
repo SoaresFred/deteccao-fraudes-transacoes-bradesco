@@ -38,7 +38,7 @@ Os gráficos e a tabela `model_metrics.csv` são gravados em `outputs/`.
 
 ## Metodologia
 
-O fluxo valida as colunas e a variável-alvo, extrai uma feature aproximada de hora do dia a partir de `Time` e remove o contador original. Em seguida, separa os dados em 60% treino, 20% validação e 20% teste usando `stratify`, mantendo o teste isolado até a avaliação final.
+O fluxo valida as colunas e a variável-alvo, extrai uma hora aproximada de `Time` e cria `Hour_sin` e `Hour_cos`, preservando a natureza cíclica do horário. O contador original é removido. Em seguida, separa os dados em 60% treino, 20% validação e 20% teste usando `stratify`, mantendo o teste isolado até a avaliação final.
 
 A Regressão Logística usa `StandardScaler` dentro de um `Pipeline`, enquanto o Random Forest usa `class_weight="balanced"`. Um `DummyClassifier` com estratégia `prior` serve como baseline ingênuo. O threshold alternativo é escolhido somente no conjunto de validação, respeitando uma precisão mínima, e depois aplicado uma única vez no conjunto de teste.
 
@@ -52,7 +52,9 @@ Os modelos comparados são:
 
 O principal critério de negócio é o **recall da fraude**, pois falsos negativos representam fraudes que não foram detectadas. A precision controla o volume de falsos positivos encaminhados para investigação manual. PR-AUC é acompanhada porque costuma ser mais informativa que ROC-AUC em problemas extremamente desbalanceados.
 
-Após o treinamento, o projeto salva a importância das variáveis do Random Forest e os coeficientes absolutos da Regressão Logística em CSV e PNG. Essas explicações são associativas, não causais, especialmente para as variáveis anonimizadas `V1`–`V28`.
+O threshold é escolhido na validação pela menor matriz de custo simulada, com custos configuráveis de R$ 5,00 por falso positivo e R$ 150,00 por falso negativo. Esses valores são hipóteses educacionais, não resultados financeiros reais, e ficam registrados nos outputs.
+
+Após o treinamento, o projeto salva a importância das variáveis do Random Forest e os coeficientes direcionais da Regressão Logística em CSV e PNG. O sinal indica associação com aumento ou redução do risco previsto; essas explicações não são causais, especialmente para as variáveis anonimizadas `V1`–`V28`.
 
 ## Estrutura
 
@@ -73,6 +75,6 @@ Após o treinamento, o projeto salva a importância das variáveis do Random For
 
 ## Limitações
 
-As variáveis `V1`–`V28` são anonimizadas e transformadas, portanto sua importância não deve ser interpretada como causalidade. A feature `Hour` é uma aproximação derivada do contador `Time`, não uma data real de negócio, o que limita validações temporais. Os resultados numéricos devem ser preenchidos após a execução com o CSV original; este repositório não inventa métricas.
+As variáveis `V1`–`V28` são anonimizadas e transformadas, portanto sua importância não deve ser interpretada como causalidade. `Hour_sin` e `Hour_cos` são aproximações derivadas do contador `Time`, não uma data real de negócio, o que limita validações temporais. Os custos de R$ 5,00 e R$ 150,00 são hipóteses para demonstrar o trade-off e devem ser substituídos por valores definidos pelo negócio em um ambiente real. Os resultados numéricos devem ser preenchidos após a execução com o CSV original; este repositório não inventa métricas.
 
 Este projeto é educacional e não deve ser utilizado sozinho para decisões financeiras reais.

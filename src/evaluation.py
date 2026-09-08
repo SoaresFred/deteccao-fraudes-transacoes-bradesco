@@ -18,7 +18,15 @@ def sanitize_filename(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", name.lower()).strip("_")
 
 
-def evaluate_model(name: str, model, X_eval, y_eval, threshold: float = 0.5) -> dict:
+def evaluate_model(
+    name: str,
+    model,
+    X_eval,
+    y_eval,
+    threshold: float = 0.5,
+    false_positive_cost: float = 5.0,
+    false_negative_cost: float = 150.0,
+) -> dict:
     probabilities = model.predict_proba(X_eval)[:, 1]
     predictions = (probabilities >= threshold).astype(int)
     report = classification_report(
@@ -39,20 +47,44 @@ def evaluate_model(name: str, model, X_eval, y_eval, threshold: float = 0.5) -> 
         "false_negatives": int(fn),
         "true_positives": int(tp),
         "true_negatives": int(tn),
+        "false_positive_cost": false_positive_cost,
+        "false_negative_cost": false_negative_cost,
+        "estimated_cost": (fp * false_positive_cost) + (fn * false_negative_cost),
         "predictions": predictions,
         "probabilities": probabilities,
     }
 
 
-def choose_threshold(model, X_validation, y_validation, candidates=None, min_precision=0.50):
-    candidates = candidates or [round(i / 100, 2) for i in range(10, 50, 5)]
+def choose_threshold(
+    model,
+    X_validation,
+    y_validation,
+    candidates=None,
+    false_positive_cost: float = 5.0,
+    false_negative_cost: float = 150.0,
+) -> float:
+    """Escolhe o limiar de menor custo na validação, nunca no teste."""
+    candidates = candidates or [round(i / 100, 2) for i in range(10, 95, 5)]
     validation_results = [
-        evaluate_model("validation", model, X_validation, y_validation, threshold=t)
-        for t in candidates
+        evaluate_model(
+            "validation",
+            model,
+            X_validation,
+            y_validation,
+            threshold=threshold,
+            false_positive_cost=false_positive_cost,
+            false_negative_cost=false_negative_cost,
+        )
+        for threshold in candidates
     ]
-    eligible = [r for r in validation_results if r["precision"] >= min_precision]
-    pool = eligible or validation_results
-    best = max(pool, key=lambda r: (r["recall"], r["f1"], r["precision"]))
+    best = min(
+        validation_results,
+        key=lambda result: (
+            result["estimated_cost"],
+            -result["recall"],
+            -result["precision"],
+        ),
+    )
     return float(best["threshold"])
 
 
@@ -75,30 +107,46 @@ def save_evaluation_plots(result: dict, y_eval, output_dir: Path):
 
 def save_feature_explanation(model, feature_names, model_name: str, output_dir: Path):
     values = None
+    kind = "importance"
     if hasattr(model, "feature_importances_"):
         values = model.feature_importances_
+    elif hasattr(model, "coef_"):
+        values = model.coef_[0]
+        kind = "coefficient"
     elif hasattr(model, "named_steps"):
         estimator = model.named_steps.get("model")
         if estimator is not None and hasattr(estimator, "coef_"):
-            values = abs(estimator.coef_[0])
+            values = estimator.coef_[0]
+            kind = "coefficient"
 
     if values is None:
         return
 
-    importance = pd.Series(values, index=feature_names, name="importance")
-    importance = importance.sort_values(ascending=False)
-    importance.to_csv(output_dir / f"{sanitize_filename(model_name)}_feature_importance.csv")
+    explanation = pd.DataFrame({"feature": list(feature_names), kind: values})
+    if kind == "coefficient":
+        explanation["absolute_value"] = explanation[kind].abs()
+        explanation["direction"] = explanation[kind].map(
+            lambda value: "aumenta risco" if value > 0 else "reduz risco" if value < 0 else "neutro"
+        )
+        ranking = explanation.sort_values("absolute_value", ascending=False)
+        plot_values = ranking.head(15).sort_values(kind)
+        x_column = kind
+        plot_label = "Coeficiente (sinal preservado)"
+    else:
+        ranking = explanation.sort_values(kind, ascending=False)
+        plot_values = ranking.head(15).sort_values(kind)
+        x_column = kind
+        plot_label = "Importância global"
 
-    top = importance.head(15).sort_values()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = sanitize_filename(model_name)
+    ranking.to_csv(output_dir / f"{safe_name}_feature_explanation.csv", index=False)
     plt.figure(figsize=(8, 6))
-    top.plot(kind="barh", color="#2563eb")
+    plot_values.plot(kind="barh", x="feature", y=x_column, legend=False, color="#2563eb")
     plt.title(f"Variáveis mais influentes — {model_name}")
-    plt.xlabel("Importância absoluta")
+    plt.xlabel(plot_label)
     plt.tight_layout()
-    plt.savefig(
-        output_dir / f"{sanitize_filename(model_name)}_feature_importance.png",
-        dpi=150,
-    )
+    plt.savefig(output_dir / f"{safe_name}_feature_explanation.png", dpi=150)
     plt.close()
 
 
@@ -106,13 +154,11 @@ def save_curves(results: list, y_eval, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     plt.figure(figsize=(7, 5))
-    plotted = False
     for result in results:
         if len(set(y_eval)) > 1:
             fpr, tpr, _ = roc_curve(y_eval, result["probabilities"])
             plt.plot(fpr, tpr, label=f"{result['model']} (AUC={result['roc_auc']:.3f})")
-            plotted = True
-    if plotted:
+    if len(set(y_eval)) > 1:
         plt.plot([0, 1], [0, 1], "--", color="gray", label="Aleatório")
     plt.xlabel("Taxa de falsos positivos")
     plt.ylabel("Recall / taxa de verdadeiros positivos")
@@ -124,9 +170,7 @@ def save_curves(results: list, y_eval, output_dir: Path):
 
     plt.figure(figsize=(7, 5))
     for result in results:
-        precision, recall, _ = precision_recall_curve(
-            y_eval, result["probabilities"]
-        )
+        precision, recall, _ = precision_recall_curve(y_eval, result["probabilities"])
         plt.plot(recall, precision, label=f"{result['model']} (AP={result['pr_auc']:.3f})")
     plt.xlabel("Recall")
     plt.ylabel("Precisão")
