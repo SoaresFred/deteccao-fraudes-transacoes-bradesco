@@ -13,10 +13,11 @@ try:
         evaluate_model,
         save_curves,
         save_evaluation_plots,
+        save_feature_explanation,
     )
     from .models import build_models
 except ImportError:  # permite python src/main.py
-    from evaluation import choose_threshold, evaluate_model, save_curves, save_evaluation_plots
+    from evaluation import choose_threshold, evaluate_model, save_curves, save_evaluation_plots, save_feature_explanation
     from models import build_models
 
 logging.basicConfig(
@@ -48,7 +49,8 @@ def run(data_path: str, output_dir: str = "outputs"):
     plt.savefig(output_dir / "class_distribution.png", dpi=150)
     plt.close()
 
-    # Time é removido por ser um contador relativo, sem data real ou semântica temporal robusta.
+    # O dataset não tem data real; extraímos apenas a hora cíclica aproximada.
+    df["Hour"] = (df["Time"] % 86400) / 3600
     X = df.drop(columns=["Class", "Time"])
     y = df["Class"]
 
@@ -64,6 +66,7 @@ def run(data_path: str, output_dir: str = "outputs"):
     for name, model in build_models(random_state=42).items():
         LOGGER.info("Treinando modelo: %s", name)
         model.fit(X_train, y_train)
+        save_feature_explanation(model, X_train.columns, name, output_dir)
         selected_threshold = choose_threshold(
             model, X_validation, y_validation, min_precision=0.50
         )

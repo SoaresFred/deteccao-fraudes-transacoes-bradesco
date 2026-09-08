@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 from sklearn.metrics import (
     average_precision_score,
@@ -69,6 +70,35 @@ def save_evaluation_plots(result: dict, y_eval, output_dir: Path):
     plt.ylabel("Real")
     plt.tight_layout()
     plt.savefig(output_dir / f"{clean_name}_confusion_matrix.png", dpi=150)
+    plt.close()
+
+
+def save_feature_explanation(model, feature_names, model_name: str, output_dir: Path):
+    values = None
+    if hasattr(model, "feature_importances_"):
+        values = model.feature_importances_
+    elif hasattr(model, "named_steps"):
+        estimator = model.named_steps.get("model")
+        if estimator is not None and hasattr(estimator, "coef_"):
+            values = abs(estimator.coef_[0])
+
+    if values is None:
+        return
+
+    importance = pd.Series(values, index=feature_names, name="importance")
+    importance = importance.sort_values(ascending=False)
+    importance.to_csv(output_dir / f"{sanitize_filename(model_name)}_feature_importance.csv")
+
+    top = importance.head(15).sort_values()
+    plt.figure(figsize=(8, 6))
+    top.plot(kind="barh", color="#2563eb")
+    plt.title(f"Variáveis mais influentes — {model_name}")
+    plt.xlabel("Importância absoluta")
+    plt.tight_layout()
+    plt.savefig(
+        output_dir / f"{sanitize_filename(model_name)}_feature_importance.png",
+        dpi=150,
+    )
     plt.close()
 
 
