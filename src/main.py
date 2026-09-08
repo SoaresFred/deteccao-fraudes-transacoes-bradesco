@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -6,8 +7,23 @@ import pandas as pd
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 
-from .evaluation import evaluate_model, save_curves, save_evaluation_plots
-from .models import build_models
+try:
+    from .evaluation import (
+        choose_threshold,
+        evaluate_model,
+        save_curves,
+        save_evaluation_plots,
+    )
+    from .models import build_models
+except ImportError:  # permite python src/main.py
+    from evaluation import choose_threshold, evaluate_model, save_curves, save_evaluation_plots
+    from models import build_models
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+LOGGER = logging.getLogger(__name__)
 
 
 def run(data_path: str, output_dir: str = "outputs"):
@@ -20,10 +36,10 @@ def run(data_path: str, output_dir: str = "outputs"):
     missing = required.difference(df.columns)
     if missing:
         raise ValueError(f"Colunas obrigatórias ausentes: {sorted(missing)}")
+    if not set(df["Class"].dropna().unique()).issubset({0, 1}):
+        raise ValueError("A coluna Class deve conter apenas 0 e 1.")
 
-    print("Distribuição das classes:")
-    print(df["Class"].value_counts(normalize=True).rename("proporção"))
-
+    LOGGER.info("Distribuição das classes:\n%s", df["Class"].value_counts(normalize=True))
     plt.figure(figsize=(5, 4))
     sns.countplot(data=df, x="Class")
     plt.title("Distribuição das classes")
@@ -32,30 +48,41 @@ def run(data_path: str, output_dir: str = "outputs"):
     plt.savefig(output_dir / "class_distribution.png", dpi=150)
     plt.close()
 
-    X = df.drop(columns="Class")
+    # Time é removido por ser um contador relativo, sem data real ou semântica temporal robusta.
+    X = df.drop(columns=["Class", "Time"])
     y = df["Class"]
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.30, random_state=42, stratify=y
+
+    # 60% treino, 20% validação para escolher threshold, 20% teste final intocado.
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X, y, test_size=0.40, random_state=42, stratify=y
+    )
+    X_validation, X_test, y_validation, y_test = train_test_split(
+        X_temp, y_temp, test_size=0.50, random_state=42, stratify=y_temp
     )
 
     results = []
-    for name, model in build_models().items():
+    for name, model in build_models(random_state=42).items():
+        LOGGER.info("Treinando modelo: %s", name)
         model.fit(X_train, y_train)
-        result = evaluate_model(name, model, X_test, y_test, output_dir)
-        result_low_threshold = evaluate_model(
-            f"{name} (limiar 0.30)", model, X_test, y_test, output_dir, threshold=0.30
+        selected_threshold = choose_threshold(
+            model, X_validation, y_validation, min_precision=0.50
         )
-        print(f"\n{name} — limiar 0.50")
-        print({k: round(result[k], 4) for k in ("precision", "recall", "f1", "roc_auc", "pr_auc")})
-        print(f"{name} — limiar 0.30")
-        print({k: round(result_low_threshold[k], 4) for k in ("precision", "recall", "f1", "roc_auc", "pr_auc")})
-        save_evaluation_plots(result, y_test, output_dir)
-        results.append(result)
+        LOGGER.info("Threshold selecionado na validação para %s: %.2f", name, selected_threshold)
 
-    save_curves(results, y_test, output_dir)
-    pd.DataFrame(
-        [{k: v for k, v in result.items() if k not in {"predictions", "probabilities"}} for result in results]
-    ).to_csv(output_dir / "model_metrics.csv", index=False)
+        for threshold in (0.50, selected_threshold):
+            label = name if threshold == 0.50 else f"{name} (threshold validado)"
+            result = evaluate_model(label, model, X_test, y_test, threshold=threshold)
+            save_evaluation_plots(result, y_test, output_dir)
+            results.append(result)
+
+    save_curves([r for r in results if r["threshold"] == 0.50], y_test, output_dir)
+    export_data = [
+        {k: v for k, v in r.items() if k not in {"predictions", "probabilities"}}
+        for r in results
+    ]
+    pd.DataFrame(export_data).to_csv(output_dir / "model_metrics.csv", index=False)
+    LOGGER.info("Execução concluída. Métricas e gráficos salvos em %s.", output_dir)
+    return pd.DataFrame(export_data)
 
 
 if __name__ == "__main__":

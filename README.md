@@ -1,16 +1,16 @@
-# Detecção de Fraudes em Transações Bancárias
+# Detecção de Fraudes Bancárias com Machine Learning
 
-Projeto de análise de dados e classificação para identificar transações fraudulentas em um dataset público de cartões de crédito. A implementação acompanha os conceitos das videoaulas, mas inclui uma estrutura modular, prevenção de vazamento de dados, comparação de modelos e avaliação orientada ao recall da classe fraude.
+Projeto modular de análise de dados e classificação para identificar transações fraudulentas em um dataset público de cartões de crédito. A solução foi estruturada para demonstrar boas práticas de ciência de dados: baseline ingênuo, prevenção de vazamento, separação treino/validação/teste, comparação de modelos, seleção de threshold em validação e avaliação final com métricas apropriadas para uma classe rara.
 
 ## Objetivo
 
-Detectar a classe rara (`Class = 1`) sem avaliar o modelo apenas pela acurácia. Em bases altamente desbalanceadas, um modelo que sempre prevê transação normal pode ter acurácia alta e ainda assim ser inútil. Por isso, o projeto acompanha precision, recall, F1-score, ROC-AUC, PR-AUC e matriz de confusão.
+Detectar a classe rara (`Class = 1`) sem depender apenas da acurácia. Em bases altamente desbalanceadas, um modelo que sempre prevê transação normal pode apresentar acurácia alta e ainda ser inútil. Por isso, o projeto acompanha precision, recall, F1-score, ROC-AUC, PR-AUC, falsos positivos e falsos negativos.
 
 ## Fonte dos dados
 
-O projeto utiliza o dataset público **Credit Card Fraud Detection**, originalmente disponibilizado no Kaggle pela ULB Machine Learning Group e também espelhado em repositórios públicos. O arquivo esperado é `creditcard.csv`, com as colunas `Time`, `V1`–`V28`, `Amount` e `Class`.
+O projeto utiliza o dataset público [Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud), originalmente disponibilizado pela ULB Machine Learning Group. O arquivo esperado é `creditcard.csv`, com as colunas `Time`, `V1`–`V28`, `Amount` e `Class`.
 
-Para executar, baixe o arquivo da [página do dataset no Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) e coloque-o em `data/creditcard.csv`. O arquivo de dados não é versionado neste repositório por ser grande e conter dados de terceiros.
+Baixe o arquivo no Kaggle e coloque-o em `data/creditcard.csv`. O CSV não é versionado porque é grande e contém dados de terceiros.
 
 ## Como executar
 
@@ -19,16 +19,38 @@ python -m venv .venv
 source .venv/bin/activate        # Linux/macOS
 # .venv\Scripts\activate       # Windows
 pip install -r requirements.txt
-python -m src.main --data data/creditcard.csv
+python -m src.main --data data/creditcard.csv --output outputs
 ```
 
-Os gráficos e tabelas são gravados em `outputs/`.
+Também é possível executar diretamente:
 
-## Abordagem
+```bash
+python src/main.py --data data/creditcard.csv --output outputs
+```
 
-O pipeline realiza inspeção da distribuição da variável-alvo, separação estratificada de treino e teste, padronização de `Amount` dentro de um `Pipeline` para evitar data leakage, comparação entre Regressão Logística e Random Forest com `class_weight="balanced"`, avaliação com métricas adequadas e ajuste opcional do limiar de decisão para priorizar o recall.
+Para rodar os testes:
 
-O conjunto de teste permanece isolado. O `StandardScaler` é ajustado somente no treinamento, em vez de calcular média e desvio padrão usando todos os dados.
+```bash
+pytest -q
+```
+
+Os gráficos e a tabela `model_metrics.csv` são gravados em `outputs/`.
+
+## Metodologia
+
+O fluxo valida as colunas e a variável-alvo, remove `Time` por ser um contador relativo sem data real, separa os dados em 60% treino, 20% validação e 20% teste usando `stratify`, e mantém o teste isolado até a avaliação final.
+
+A Regressão Logística usa `StandardScaler` dentro de um `Pipeline`, enquanto o Random Forest usa `class_weight="balanced"`. Um `DummyClassifier` com estratégia `prior` serve como baseline ingênuo. O threshold alternativo é escolhido somente no conjunto de validação, respeitando uma precisão mínima, e depois aplicado uma única vez no conjunto de teste.
+
+## Modelos e métricas
+
+Os modelos comparados são:
+
+- **Baseline (Dummy):** referência simples baseada na distribuição das classes;
+- **Regressão Logística:** baseline interpretável para classificação;
+- **Random Forest:** conjunto de árvores com ponderação para a classe minoritária.
+
+O principal critério de negócio é o **recall da fraude**, pois falsos negativos representam fraudes que não foram detectadas. A precision controla o volume de falsos positivos encaminhados para investigação manual. PR-AUC é acompanhada porque costuma ser mais informativa que ROC-AUC em problemas extremamente desbalanceados.
 
 ## Estrutura
 
@@ -36,8 +58,10 @@ O conjunto de teste permanece isolado. O `StandardScaler` é ajustado somente no
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
-├── data/                  # arquivo local, não versionado
-├── outputs/               # gráficos gerados, não versionados
+├── data/                  # CSV local, não versionado
+├── outputs/               # resultados gerados, não versionados
+├── tests/
+│   └── test_evaluation.py
 └── src/
     ├── __init__.py
     ├── evaluation.py
@@ -45,8 +69,8 @@ O conjunto de teste permanece isolado. O `StandardScaler` é ajustado somente no
     └── main.py
 ```
 
-## Interpretação
+## Limitações
 
-O principal critério de negócio é o **recall da classe fraude**: entre todas as fraudes reais, quantas foram identificadas. Precision também é importante para controlar falsos positivos. O limiar de 0,30 é apresentado como experimento: ele tende a capturar mais fraudes, mas pode sinalizar mais transações legítimas para investigação manual. O melhor limiar deve ser escolhido de acordo com o custo de falsos negativos e falsos positivos.
+As variáveis `V1`–`V28` são anonimizadas e transformadas, portanto sua importância não deve ser interpretada como causalidade. O dataset não fornece uma data real de negócio, o que limita validações temporais. Os resultados numéricos devem ser preenchidos após a execução com o CSV original; este repositório não inventa métricas.
 
 Este projeto é educacional e não deve ser utilizado sozinho para decisões financeiras reais.
