@@ -64,7 +64,9 @@ def choose_threshold(
     false_negative_cost: float = 150.0,
 ) -> float:
     """Escolhe o limiar de menor custo na validação, nunca no teste."""
-    candidates = candidates or [round(i / 100, 2) for i in range(10, 95, 5)]
+    candidates = candidates or [0.01, 0.02, 0.05] + [
+        round(i / 100, 2) for i in range(10, 95, 5)
+    ]
     validation_results = [
         evaluate_model(
             "validation",

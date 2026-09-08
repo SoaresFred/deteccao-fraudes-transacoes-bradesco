@@ -2,11 +2,11 @@ import argparse
 import logging
 from pathlib import Path
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sklearn.model_selection import train_test_split
 
 try:
     from .evaluation import (
@@ -41,6 +41,8 @@ def run(data_path: str, output_dir: str = "outputs"):
     if not set(df["Class"].dropna().unique()).issubset({0, 1}):
         raise ValueError("A coluna Class deve conter apenas 0 e 1.")
 
+    df = df.sort_values("Time").reset_index(drop=True)
+
     LOGGER.info("Distribuição das classes:\n%s", df["Class"].value_counts(normalize=True))
     plt.figure(figsize=(5, 4))
     sns.countplot(data=df, x="Class")
@@ -57,18 +59,31 @@ def run(data_path: str, output_dir: str = "outputs"):
     X = df.drop(columns=["Class", "Time"])
     y = df["Class"]
 
-    # 60% treino, 20% validação para escolher threshold, 20% teste final intocado.
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        X, y, test_size=0.40, random_state=42, stratify=y
+    # Divisão out-of-time: passado para treino, período intermediário para validação
+    # e período posterior para teste. Assim, o futuro nunca influencia o passado.
+    split_train = int(len(df) * 0.60)
+    split_validation = int(len(df) * 0.80)
+    X_train, X_validation, X_test = (
+        X.iloc[:split_train],
+        X.iloc[split_train:split_validation],
+        X.iloc[split_validation:],
     )
-    X_validation, X_test, y_validation, y_test = train_test_split(
-        X_temp, y_temp, test_size=0.50, random_state=42, stratify=y_temp
+    y_train, y_validation, y_test = (
+        y.iloc[:split_train],
+        y.iloc[split_train:split_validation],
+        y.iloc[split_validation:],
     )
+    if y_train.nunique() < 2 or y_validation.nunique() < 2 or y_test.nunique() < 2:
+        raise ValueError(
+            "A divisão temporal precisa conter as classes 0 e 1 em treino, validação e teste."
+        )
 
     results = []
     for name, model in build_models(random_state=42).items():
         LOGGER.info("Treinando modelo: %s", name)
         model.fit(X_train, y_train)
+        artifact_name = name.lower().replace(" ", "_").replace("ã", "a")
+        joblib.dump(model, output_dir / f"{artifact_name}.pkl")
         save_feature_explanation(model, X_train.columns, name, output_dir)
         selected_threshold = choose_threshold(
             model,

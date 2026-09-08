@@ -38,7 +38,7 @@ Os gráficos e a tabela `model_metrics.csv` são gravados em `outputs/`.
 
 ## Metodologia
 
-O fluxo valida as colunas e a variável-alvo, extrai uma hora aproximada de `Time` e cria `Hour_sin` e `Hour_cos`, preservando a natureza cíclica do horário. O contador original é removido. Em seguida, separa os dados em 60% treino, 20% validação e 20% teste usando `stratify`, mantendo o teste isolado até a avaliação final.
+O fluxo valida as colunas e a variável-alvo, extrai uma hora aproximada de `Time` e cria `Hour_sin` e `Hour_cos`, preservando a natureza cíclica do horário. O contador original é removido. Em seguida, ordena os registros pelo tempo original e separa cronologicamente em 60% treino, 20% validação e 20% teste. Assim, períodos futuros não influenciam a avaliação de períodos anteriores. Cada partição precisa conter as duas classes.
 
 A Regressão Logística usa `StandardScaler` dentro de um `Pipeline`, enquanto o Random Forest usa `class_weight="balanced"`. Um `DummyClassifier` com estratégia `prior` serve como baseline ingênuo. O threshold alternativo é escolhido somente no conjunto de validação, respeitando uma precisão mínima, e depois aplicado uma única vez no conjunto de teste.
 
@@ -52,9 +52,11 @@ Os modelos comparados são:
 
 O principal critério de negócio é o **recall da fraude**, pois falsos negativos representam fraudes que não foram detectadas. A precision controla o volume de falsos positivos encaminhados para investigação manual. PR-AUC é acompanhada porque costuma ser mais informativa que ROC-AUC em problemas extremamente desbalanceados.
 
-O threshold é escolhido na validação pela menor matriz de custo simulada, com custos configuráveis de R$ 5,00 por falso positivo e R$ 150,00 por falso negativo. Esses valores são hipóteses educacionais, não resultados financeiros reais, e ficam registrados nos outputs.
+O threshold é escolhido na validação pela menor matriz de custo simulada, testando também probabilidades muito baixas. Os custos são configuráveis: R$ 5,00 por falso positivo e R$ 150,00 por falso negativo. Esses valores são hipóteses educacionais, não resultados financeiros reais, e ficam registrados nos outputs.
 
 Após o treinamento, o projeto salva a importância das variáveis do Random Forest e os coeficientes direcionais da Regressão Logística em CSV e PNG. O sinal indica associação com aumento ou redução do risco previsto; essas explicações não são causais, especialmente para as variáveis anonimizadas `V1`–`V28`.
+
+Os modelos treinados também são exportados como artefatos `.pkl` em `outputs/`, permitindo carregamento posterior para inferência. Em produção, esses artefatos devem ser versionados e submetidos a controles de segurança e validação.
 
 ## Estrutura
 
